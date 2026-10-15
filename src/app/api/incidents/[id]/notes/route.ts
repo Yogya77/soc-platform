@@ -21,7 +21,7 @@ export async function POST(
 
     const updated = await IncidentsService.addNote(
       id,
-      parsed.data.author || auth.auth.name,
+      auth.auth.name,
       parsed.data.content
     );
     return jsonSuccess(updated, 201);

@@ -1,9 +1,12 @@
 import { NextRequest } from 'next/server';
 import { SettingsService } from '@/server/services/settings.service';
 import { jsonSuccess, jsonError, handleDatabaseError } from '@/server/api-response';
-import { requireDevOrAuth } from '@/server/auth-guard';
+import { requireAuth, requireDevOrAuth } from '@/server/auth-guard';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = requireAuth(req, 'read:security_data');
+  if (!auth.authorized) return auth.response;
+
   try {
     const settings = await SettingsService.getSettings();
     return jsonSuccess(settings);

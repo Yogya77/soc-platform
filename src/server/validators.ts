@@ -64,3 +64,8 @@ export const auditLogCreateSchema = z.object({
   targetId: z.string().min(1).max(100),
   details: z.string().min(1).max(2000),
 });
+
+export const loginSchema = z.object({
+  email: z.string().email('Please enter a valid email address'),
+  password: z.string().min(1, 'Password is required').max(200),
+});

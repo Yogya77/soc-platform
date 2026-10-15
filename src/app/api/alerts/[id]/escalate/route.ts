@@ -25,7 +25,11 @@ export async function POST(
       return jsonError('Invalid escalation request', 400, 'VALIDATION_ERROR', parsed.error.format());
     }
 
-    const incident = await AlertsService.escalateToIncident(id, parsed.data, auth.auth.name);
+    const incident = await AlertsService.escalateToIncident(
+      id,
+      { ...parsed.data, assignedAnalyst: auth.auth.name },
+      auth.auth.name
+    );
     return jsonSuccess(incident, 201);
   } catch (err) {
     return handleDatabaseError(err);

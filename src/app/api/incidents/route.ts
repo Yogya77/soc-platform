@@ -2,9 +2,12 @@ import { NextRequest } from 'next/server';
 import { IncidentsService } from '@/server/services/incidents.service';
 import { jsonSuccess, jsonError, handleDatabaseError } from '@/server/api-response';
 import { incidentCreateSchema } from '@/server/validators';
-import { requireDevOrAuth } from '@/server/auth-guard';
+import { requireAuth, requireDevOrAuth } from '@/server/auth-guard';
 
 export async function GET(req: NextRequest) {
+  const auth = requireAuth(req, 'read:security_data');
+  if (!auth.authorized) return auth.response;
+
   try {
     const { searchParams } = new URL(req.url);
     const severity = searchParams.get('severity') || undefined;
@@ -33,14 +36,13 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const parsed = incidentCreateSchema.safeParse(body);
     if (!parsed.success) {
-      return jsonError('Invalid incident creation data', 400, 'VALIDATION_ERROR', parsed.error.format());
+      return jsonError('Invalid incident creation request', 400, 'VALIDATION_ERROR', parsed.error.format());
     }
 
     const created = await IncidentsService.createIncident({
       ...parsed.data,
-      assignedAnalyst: parsed.data.assignedAnalyst || auth.auth.name,
+      assignedAnalyst: auth.auth.name,
     });
-
     return jsonSuccess(created, 201);
   } catch (err) {
     return handleDatabaseError(err);

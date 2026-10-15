@@ -2,9 +2,12 @@ import { NextRequest } from 'next/server';
 import { AuditService } from '@/server/services/audit.service';
 import { jsonSuccess, jsonError, handleDatabaseError } from '@/server/api-response';
 import { auditLogCreateSchema } from '@/server/validators';
-import { requireDevOrAuth } from '@/server/auth-guard';
+import { requireAuth, requireDevOrAuth } from '@/server/auth-guard';
 
 export async function GET(req: NextRequest) {
+  const auth = requireAuth(req, 'read:security_data');
+  if (!auth.authorized) return auth.response;
+
   try {
     const searchParams = req.nextUrl.searchParams;
     const limit = Number(searchParams.get('limit')) || 100;
@@ -26,7 +29,10 @@ export async function POST(req: NextRequest) {
       return jsonError('Invalid audit log payload', 400, 'VALIDATION_ERROR', parsed.error.format());
     }
 
-    const created = await AuditService.addLog(parsed.data);
+    const created = await AuditService.addLog({
+      ...parsed.data,
+      analyst: auth.auth.name,
+    });
     return jsonSuccess(created, 201);
   } catch (err) {
     return handleDatabaseError(err);

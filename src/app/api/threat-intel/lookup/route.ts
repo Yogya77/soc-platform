@@ -1,8 +1,12 @@
 import { NextRequest } from 'next/server';
 import { ThreatIntelService } from '@/server/services/threat-intel.service';
 import { jsonSuccess, jsonError, handleDatabaseError } from '@/server/api-response';
+import { requireAuth } from '@/server/auth-guard';
 
 export async function GET(req: NextRequest) {
+  const auth = requireAuth(req, 'read:security_data');
+  if (!auth.authorized) return auth.response;
+
   try {
     const searchParams = req.nextUrl.searchParams;
     const value = searchParams.get('value');

@@ -1,8 +1,12 @@
 import { NextRequest } from 'next/server';
 import { EventsService } from '@/server/services/events.service';
 import { jsonSuccess, handleDatabaseError } from '@/server/api-response';
+import { requireAuth } from '@/server/auth-guard';
 
 export async function GET(req: NextRequest) {
+  const auth = requireAuth(req, 'read:security_data');
+  if (!auth.authorized) return auth.response;
+
   try {
     const { searchParams } = new URL(req.url);
     const eventIdParam = searchParams.get('eventId');
