@@ -1,0 +1,399 @@
+// ==============================================================================
+// Prisma Schema for Cybersecurity Operations Center (SOC) Platform
+// Database Provider: PostgreSQL
+// ==============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------------------------
+// Authentication & RBAC Models
+// ------------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  LEAD_ANALYST
+  TIER2_ANALYST
+  TIER1_ANALYST
+  READ_ONLY
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  role         Role       @default(TIER2_ANALYST)
+  department   String?
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  sessions     Session[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+// ------------------------------------------------------------------------------
+// Asset Inventory & Affected Hosts
+// ------------------------------------------------------------------------------
+
+model Asset {
+  id              String          @id // e.g. "AST-101"
+  hostname        String          @unique
+  ipAddress       String
+  macAddress      String
+  operatingSystem String
+  role            String          // e.g. "Domain Controller", "Workstation"
+  health          String          @default("HEALTHY") // HEALTHY, WARNING, CRITICAL, OFFLINE
+  riskScore       Int             @default(0) // 0-100
+  openAlertCount  Int             @default(0)
+  incidentCount   Int             @default(0)
+  lastSeen        DateTime
+  assignedUser    String?
+  department      String?
+  isolationStatus String          @default("NORMAL") // ISOLATED, NORMAL
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  alerts          Alert[]
+  events          SecurityEvent[]
+  incidents       IncidentAsset[]
+
+  @@index([hostname])
+  @@index([ipAddress])
+  @@index([health])
+  @@map("assets")
+}
+
+// ------------------------------------------------------------------------------
+// Detection Rules (Sigma / SIEM)
+// ------------------------------------------------------------------------------
+
+model DetectionRule {
+  id                   String    @id // e.g. "RULE-WIN-001"
+  name                 String
+  description          String
+  severity             String    // CRITICAL, HIGH, MEDIUM, LOW
+  mitreTactic          String    // Initial Access, Execution, etc.
+  mitreTechniqueId     String    // e.g. "T1059.001"
+  mitreTechniqueName   String
+  queryLogic           String
+  sigmaYaml            String?   @db.Text
+  exampleMatchingEvent String?
+  eventSources         String[]
+  status               String    @default("ACTIVE") // ACTIVE, DISABLED, TESTING
+  lastTriggered        DateTime?
+  triggerCount         Int       @default(0)
+  author               String
+  falsePositiveRate    String    @default("LOW") // LOW, MEDIUM, HIGH
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  alerts               Alert[]
+
+  @@index([status])
+  @@index([severity])
+  @@index([mitreTechniqueId])
+  @@map("detection_rules")
+}
+
+// ------------------------------------------------------------------------------
+// Security Events (Windows Event Telemetry)
+// ------------------------------------------------------------------------------
+
+model SecurityEvent {
+  id                 String   @id // e.g. "EVT-9041"
+  timestamp          DateTime
+  eventId            Int      // 4624, 4625, 4688, 7045, etc.
+  eventName          String
+  hostname           String
+  sourceIp           String?
+  destinationIp      String?
+  username           String
+  domain             String
+  processName        String?
+  processCommandLine String?  @db.Text
+  parentProcessName  String?
+  logonType          Int?
+  provider           String   // Microsoft-Windows-Security-Auditing, Sysmon
+  severity           String   // INFO, WARNING, CRITICAL
+  status             String   // AUDIT_SUCCESS, AUDIT_FAILURE
+  detectionRelevance String?
+  rawXmlOrJson       Json
+
+  assetId            String?
+  asset              Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  createdAt          DateTime @default(now())
+
+  @@index([eventId])
+  @@index([hostname])
+  @@index([username])
+  @@index([timestamp])
+  @@index([severity])
+  @@map("security_events")
+}
+
+// ------------------------------------------------------------------------------
+// Security Alerts
+// ------------------------------------------------------------------------------
+
+model Alert {
+  id                  String         @id // e.g. "ALT-2026-8812"
+  title               String
+  description         String
+  severity            String         // CRITICAL, HIGH, MEDIUM, LOW, INFO
+  status              String         @default("NEW") // NEW, INVESTIGATING, ESCALATED, DISMISSED, RESOLVED
+  assetId             String
+  asset               Asset          @relation(fields: [assetId], references: [id])
+  hostname            String
+  sourceIp            String?
+  destinationIp       String?
+  username            String?
+  ruleId              String
+  rule                DetectionRule  @relation(fields: [ruleId], references: [id])
+  ruleName            String
+  mitreTechniqueId    String?
+  mitreTechniqueName  String?
+  mitreTactic         String?
+  whyTriggered        String?        @db.Text
+  associatedIocValues String[]
+  confidenceScore     Int            @default(50)
+  detectedAt          DateTime
+  evidence            Json
+
+  incidentId          String?
+  incident            Incident?      @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@index([status])
+  @@index([severity])
+  @@index([assetId])
+  @@index([ruleId])
+  @@index([incidentId])
+  @@index([detectedAt])
+  @@map("alerts")
+}
+
+// ------------------------------------------------------------------------------
+// Security Incidents
+// ------------------------------------------------------------------------------
+
+model Incident {
+  id                  String             @id // e.g. "INC-2026-0421"
+  title               String
+  severity            String             // CRITICAL, HIGH, MEDIUM, LOW
+  riskScore           Int                @default(50) // 0-100
+  status              String             @default("OPEN") // OPEN, INVESTIGATING, CONTAINED, ERADICATED, CLOSED
+  assignedAnalyst     String
+  rootCauseHypothesis String             @db.Text
+  mitreTactics        String[]
+  isAiAnalyzed        Boolean            @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  alerts              Alert[]
+  timeline            IncidentTimeline[]
+  notes               IncidentNote[]
+  affectedAssets      IncidentAsset[]
+  aiInvestigation     AIInvestigation?
+  report              InvestigationReport?
+
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+  @@map("incidents")
+}
+
+model IncidentAsset {
+  incidentId String
+  assetId    String
+
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@id([incidentId, assetId])
+  @@map("incident_assets")
+}
+
+model IncidentTimeline {
+  id          String   @id // e.g. "TL-..."
+  incidentId  String
+  incident    Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  timestamp   DateTime
+  stage       String   // EVENT, DETECTION, ALERT, INCIDENT_CREATED, AI_ANALYSIS, CONTAINMENT
+  title       String
+  description String   @db.Text
+  sourceType  String   // Windows Event, Sigma Rule, Alert Engine, SOC Analyst, AI Agent
+  referenceId String?
+
+  @@index([incidentId])
+  @@index([timestamp])
+  @@map("incident_timeline")
+}
+
+model IncidentNote {
+  id         String   @id // e.g. "NOTE-..."
+  incidentId String
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  timestamp  DateTime @default(now())
+  author     String
+  content    String   @db.Text
+
+  @@index([incidentId])
+  @@map("incident_notes")
+}
+
+// ------------------------------------------------------------------------------
+// Threat Intelligence Indicators (IOCs)
+// ------------------------------------------------------------------------------
+
+model ThreatIndicator {
+  id                    String   @id // e.g. "IOC-001"
+  indicator             String   @unique
+  type                  String   // IP, DOMAIN, HASH_SHA256, HASH_MD5, URL
+  verdict               String   // MALICIOUS (SIMULATED), SUSPICIOUS, BENIGN, UNKNOWN
+  confidenceScore       Int      @default(50)
+  sourceLabel           String   @default("Demo Threat Intelligence Dataset")
+  isSimulated           Boolean  @default(true)
+  threatActor           String?
+  malwareFamily         String?
+  firstSeen             DateTime
+  lastSeen              DateTime
+  associatedHostnames   String[]
+  associatedEventIds    String[]
+  associatedAlertIds    String[]
+  associatedIncidentIds String[]
+  mitreTechniques       Json?    // array of { id, name }
+  tags                  String[]
+  description           String   @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([indicator])
+  @@index([type])
+  @@index([verdict])
+  @@map("threat_indicators")
+}
+
+// ------------------------------------------------------------------------------
+// AI Analyst Investigations & Playbook Recommendations
+// ------------------------------------------------------------------------------
+
+model AIInvestigation {
+  id                     String             @id @default(cuid())
+  incidentId             String             @unique
+  incident               Incident           @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  status                 String             // QUEUED, COLLECTING_EVIDENCE, COMPLETED, etc.
+  currentStepIndex       Int                @default(0)
+  steps                  Json               // array of AIInvestigationStep
+  observedEvidence       Json
+  simulatedAiAssessment  Json
+  investigativeNextSteps String[]
+  longTermRemediation    String[]
+  completedAt            DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  containmentActions     AIRecommendation[]
+
+  @@map("ai_investigations")
+}
+
+model AIRecommendation {
+  id                   String          @id // e.g. "REC-1"
+  investigationId      String
+  investigation        AIInvestigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  action               String
+  severity             String
+  target               String
+  reason               String          @db.Text
+  priority             String          // IMMEDIATE, HIGH, MEDIUM
+  status               String          @default("PROPOSED") // PROPOSED, APPROVED, REJECTED, EXECUTED
+  isAutomatedAvailable Boolean         @default(true)
+  executedAt           DateTime?
+
+  @@index([investigationId])
+  @@map("ai_recommendations")
+}
+
+// ------------------------------------------------------------------------------
+// Formal Investigation Reports
+// ------------------------------------------------------------------------------
+
+model InvestigationReport {
+  id                    String   @id // e.g. "REP-2026-0421"
+  incidentId            String   @unique
+  incident              Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  generatedAt           DateTime @default(now())
+  classification        String   @default("CONFIDENTIAL // SOC INTERNAL USE")
+  title                 String
+  severity              String
+  executiveSummary      String   @db.Text
+  observedEvidence      Json
+  simulatedAiAssessment Json
+  recommendedActions    Json
+  analystActionHistory  Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("investigation_reports")
+}
+
+// ------------------------------------------------------------------------------
+// Analyst Forensic Audit Log
+// ------------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id // e.g. "AUD-001" or "AUD-2001"
+  timestamp  DateTime @default(now())
+  analyst    String
+  action     String
+  targetType String   // ALERT, INCIDENT, ASSET, RULE, AI_INVESTIGATION, REPORT, AUTH
+  targetId   String
+  details    String   @db.Text
+
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([timestamp])
+  @@index([targetType])
+  @@index([targetId])
+  @@map("audit_logs")
+}
+
+// ------------------------------------------------------------------------------
+// Persistent Application Settings
+// ------------------------------------------------------------------------------
+
+model SystemSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_settings")
+}

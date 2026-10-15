@@ -22,7 +22,7 @@ export class HttpSecurityService implements ISecurityService {
   private mode: 'MOCK_DEMO' | 'REAL_FASTAPI' = 'REAL_FASTAPI';
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    this.baseUrl = baseUrl || process.env.NEXT_PUBLIC_API_URL || '/api';
   }
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
