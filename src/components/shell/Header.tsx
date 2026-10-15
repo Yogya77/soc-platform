@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Search, Bell, Clock, User, X, Compass, ArrowRight } from 'lucide-react';
+import { Search, Bell, Clock, User, X, Compass, ArrowRight, LogOut } from 'lucide-react';
 import { ModeToggleBadge } from '@/components/common/ModeToggleBadge';
 import { useSecurity } from '@/context/SecurityContext';
 import { OmniSearchResult } from '@/types/security';
@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 export const Header: React.FC = () => {
   const pathname = usePathname();
   const router = useRouter();
-  const { searchOmni } = useSecurity();
+  const { searchOmni, user, logout } = useSecurity();
   const [time, setTime] = useState<string>('');
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -265,19 +265,27 @@ export const Header: React.FC = () => {
           <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
         </button>
 
-        {/* Analyst Profile */}
+        {/* Analyst Profile & Logout */}
         <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
           <div className="w-7 h-7 rounded bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
             <User size={14} />
           </div>
           <div className="hidden sm:flex flex-col text-left">
             <span className="text-xs font-mono-code font-semibold text-slate-200 leading-tight">
-              S. Jenkins
+              {user?.name ?? '—'}
             </span>
             <span className="text-[10px] font-mono-code text-slate-500 leading-tight">
-              Lead IR Analyst
+              {user?.role ?? 'Unauthenticated'}
             </span>
           </div>
+          {/* Logout */}
+          <button
+            onClick={async () => { await logout(); router.push('/'); }}
+            title="Sign out"
+            className="ml-1 p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          >
+            <LogOut size={14} />
+          </button>
         </div>
       </div>
     </header>

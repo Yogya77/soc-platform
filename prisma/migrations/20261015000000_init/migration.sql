@@ -1,4 +1,4 @@
-﻿-- CreateEnum
+-- CreateEnum
 CREATE TYPE "Role" AS ENUM ('ADMIN', 'LEAD_ANALYST', 'TIER2_ANALYST', 'TIER1_ANALYST', 'READ_ONLY');
 
 -- CreateTable

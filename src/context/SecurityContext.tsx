@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { getSecurityService } from '@/services';
+import { getSecurityService, getActiveServiceMode } from '@/services';
 import {
   Alert,
   AlertStatus,
@@ -19,6 +19,14 @@ import { WindowsSecurityEvent } from '@/types/events';
 import { DetectionRule } from '@/types/rules';
 import { ThreatIndicator } from '@/types/threatIntel';
 
+export interface UserSession {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  department?: string;
+}
+
 interface SecurityContextType {
   stats: SOCDashboardStats | null;
   alerts: Alert[];
@@ -32,6 +40,13 @@ interface SecurityContextType {
   activeIncidentId: string;
   setActiveIncidentId: (id: string) => void;
   
+  // Authentication & Session
+  user: UserSession | null;
+  isAuthenticated: boolean;
+  authLoading: boolean;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
+
   refreshAll: () => Promise<void>;
   updateAlertStatus: (id: string, status: AlertStatus, note?: string) => Promise<void>;
   escalateAlert: (alertId: string, payload?: import('@/types/security').CreateIncidentPayload | string) => Promise<Incident>;
@@ -68,8 +83,44 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [loading, setLoading] = useState(true);
   const [activeIncidentId, setActiveIncidentId] = useState<string>('INC-2026-0421');
 
+  // Authentication State
+  const [user, setUser] = useState<UserSession | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+
+  // Check existing session via GET /api/auth/me
+  const checkSession = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/auth/me', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated && data.user) {
+          setUser(data.user);
+          setIsAuthenticated(true);
+          return true;
+        }
+      }
+      setUser(null);
+      setIsAuthenticated(false);
+      return false;
+    } catch {
+      setUser(null);
+      setIsAuthenticated(false);
+      return false;
+    } finally {
+      setAuthLoading(false);
+    }
+  }, []);
+
   const refreshAll = useCallback(async () => {
     try {
+      const mode = getActiveServiceMode();
+      // In live API mode, only request protected data if a valid session exists
+      if (mode === 'REAL_FASTAPI' && !isAuthenticated) {
+        setLoading(false);
+        return;
+      }
+
       const service = getSecurityService();
       const [
         dashStats,
@@ -104,17 +155,71 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAuthenticated]);
+
+  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Authentication failed' };
+      }
+
+      setUser(data.user);
+      setIsAuthenticated(true);
+      await refreshAll();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error during login' };
+    }
+  };
+
+  const logout = async (): Promise<void> => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {
+      // Ignore network failure on logout
+    } finally {
+      setUser(null);
+      setIsAuthenticated(false);
+      setStats(null);
+      setAlerts([]);
+      setIncidents([]);
+      setEvents([]);
+      setAssets([]);
+      setRules([]);
+      setThreatIntel([]);
+      setAuditLogs([]);
+    }
+  };
 
   useEffect(() => {
-    refreshAll();
-    // Deterministic heartbeat sync clock every 15 seconds
+    checkSession().then((hasSession) => {
+      if (hasSession) {
+        refreshAll();
+      } else {
+        setLoading(false);
+      }
+    });
+  }, [checkSession, refreshAll]);
+
+  // Periodic heartbeat sync clock every 15 seconds (only when authenticated)
+  useEffect(() => {
+    if (!isAuthenticated) return;
     const interval = setInterval(() => {
       const service = getSecurityService();
       service.getDashboardStats().then((s) => setStats(s)).catch(() => {});
     }, 15000);
     return () => clearInterval(interval);
-  }, [refreshAll]);
+  }, [isAuthenticated]);
 
   const updateAlertStatus = async (id: string, status: AlertStatus, note?: string) => {
     const service = getSecurityService();
@@ -227,6 +332,11 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         loading,
         activeIncidentId,
         setActiveIncidentId,
+        user,
+        isAuthenticated,
+        authLoading,
+        login,
+        logout,
         refreshAll,
         updateAlertStatus,
         escalateAlert,

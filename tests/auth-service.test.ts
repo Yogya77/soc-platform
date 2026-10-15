@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { AuthService } from '../src/server/services/auth.service';
 import { clearRateLimitStore } from '../src/server/auth-rate-limit';
 import { verifySessionToken } from '../src/server/session';
+import { prisma } from '../src/lib/prisma';
 
 describe('Stage 4: Authentication Service & Rate Limiting', () => {
   beforeEach(() => {
@@ -59,14 +60,21 @@ describe('Stage 4: Authentication Service & Rate Limiting', () => {
 
   test('strictly rejects offline fallback accounts in production environment', async () => {
     const originalEnv = process.env.NODE_ENV;
+    const originalFindUnique = prisma.user.findUnique;
     try {
       (process.env as any).NODE_ENV = 'production';
+      // Genuinely simulate database unavailability to verify fallback rejection in production
+      (prisma.user as any).findUnique = async () => {
+        throw new Error("Can't reach database server at `localhost:5432`");
+      };
+
       const result = await AuthService.login('sarah.jenkins@soc.internal', 'Analyst@2026!', '127.0.0.1');
       assert.equal(result.success, false);
       if (!result.success) {
         assert.equal(result.code, 'INVALID_CREDENTIALS');
       }
     } finally {
+      (prisma.user as any).findUnique = originalFindUnique;
       (process.env as any).NODE_ENV = originalEnv;
     }
   });
