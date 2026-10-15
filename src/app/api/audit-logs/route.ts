@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { AuditService } from '@/server/services/audit.service';
 import { jsonSuccess, jsonError, handleDatabaseError } from '@/server/api-response';
 import { auditLogCreateSchema } from '@/server/validators';
-import { requireAuth, requireDevOrAuth } from '@/server/auth-guard';
+import { requireAuth } from '@/server/auth-guard';
 
 export async function GET(req: NextRequest) {
   const auth = requireAuth(req, 'read:security_data');
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireDevOrAuth(req, 'write:audit_logs');
+  const auth = requireAuth(req, 'write:audit_logs');
   if (!auth.authorized) return auth.response;
 
   try {
